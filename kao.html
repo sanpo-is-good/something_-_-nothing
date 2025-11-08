@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Face Detection App</title>
+  <style>
+    /* 画面の余白をなくし、スクロールバーを非表示に */
+    body {
+      margin: 0;
+      background-color: #000;
+      overflow: hidden;
+    }
+    .output_canvas {
+      /* canvasをウィンドウ全体に広げる */
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+    .input_video {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <video class="input_video"></video>
+  <canvas class="output_canvas"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js" crossorigin="anonymous"></script>
+  <script>
+    const videoElement = document.querySelector('.input_video');
+    const canvasElement = document.querySelector('.output_canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+
+    // --- 1. キャンバスの解像度をウィンドウサイズに設定 ---
+    const canvasWidth = window.innerWidth;
+    const canvasHeight = window.innerHeight;
+    canvasElement.width = canvasWidth;
+    canvasElement.height = canvasHeight;
+
+    const logoImage = new Image();
+    logoImage.src = 'logo.svg';
+    logoImage.onload = () => { console.log('logo.svg loaded.'); };
+    logoImage.onerror = () => { console.error('Failed to load logo.svg.'); };
+
+    // --- スムージング設定 ---
+    // smoothedBox はピクセル座標（canvas上の座標）を保持するように変更
+    let smoothedBox = null;
+    const smoothingFactor = 0.2;
+
+    // 線形補間（Lerp）関数: 動きを滑らかにするために使用
+    function lerp(start, end, amount) {
+      return (1 - amount) * start + amount * end;
+    }
+    // ----------------------
+
+    const faceDetection = new FaceDetection({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`;
+      }
+    });
+
+    faceDetection.setOptions({
+      model: 'short',
+      minDetectionConfidence: 0.5
+    });
+
+    // --- 描画と座標計算のための変数 ---
+    let videoWidth = 0;
+    let videoHeight = 0;
+    let drawWidth = 0;
+    let drawHeight = 0;
+    let drawX = 0;
+    let drawY = 0;
+
+    function onResults(results) {
+      // 映像の描画領域を計算（object-fit: contain のシミュレーション）
+      const canvasAspect = canvasWidth / canvasHeight;
+      const videoAspect = videoWidth / videoHeight;
+
+      if (canvasAspect > videoAspect) { // canvasが横長
+        drawHeight = canvasHeight;
+        drawWidth = videoWidth * (canvasHeight / videoHeight);
+        drawX = (canvasWidth - drawWidth) / 2;
+        drawY = 0;
+      } else { // canvasが縦長
+        drawWidth = canvasWidth;
+        drawHeight = videoHeight * (canvasWidth / videoWidth);
+        drawX = 0;
+        drawY = (canvasHeight - drawHeight) / 2;
+      }
+
+      // キャンバスをクリア (黒で塗りつぶし)
+      canvasCtx.fillStyle = '#000';
+      canvasCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+      // 映像をアスペクト比を保って中央に描画
+      canvasCtx.drawImage(videoElement, drawX, drawY, drawWidth, drawHeight);
+
+      if (results.detections && results.detections.length > 0) {
+
+        const newBoxRaw = results.detections[0].boundingBox;
+
+        // MediaPipeの正規化座標(0.0-1.0)を、canvas上のピクセル座標に変換
+        const newBoxPixels = {
+          xCenter: (newBoxRaw.xCenter * drawWidth) + drawX,
+          yCenter: (newBoxRaw.yCenter * drawHeight) + drawY,
+          width: newBoxRaw.width * drawWidth,
+          height: newBoxRaw.height * drawHeight
+        };
+
+        if (!smoothedBox) {
+          smoothedBox = { ...newBoxPixels };
+        } else {
+          // スムージング処理 (ピクセル座標に対して)
+          smoothedBox.xCenter = lerp(smoothedBox.xCenter, newBoxPixels.xCenter, smoothingFactor);
+          smoothedBox.yCenter = lerp(smoothedBox.yCenter, newBoxPixels.yCenter, smoothingFactor);
+          smoothedBox.width   = lerp(smoothedBox.width, newBoxPixels.width, smoothingFactor);
+          smoothedBox.height  = lerp(smoothedBox.height, newBoxPixels.height, smoothingFactor);
+        }
+
+        // --- 4. 四角形の描画 (drawRectangleの代わり) ---
+        canvasCtx.strokeStyle = 'white';
+        canvasCtx.lineWidth = 15;
+        canvasCtx.beginPath();
+        canvasCtx.rect(
+          smoothedBox.xCenter - smoothedBox.width / 2, // 左上x
+          smoothedBox.yCenter - smoothedBox.height / 2, // 左上y
+          smoothedBox.width,
+          smoothedBox.height
+        );
+        canvasCtx.stroke();
+        // ---------------------------------------------
+
+        // --- 5. ロゴの描画 (ピクセル座標ベース) ---
+        if (logoImage.complete && logoImage.naturalWidth > 0) {
+          const logoSize = smoothedBox.width * 3.2; // スムージング後のピクセル幅
+          const logoX = smoothedBox.xCenter - logoSize / 2;
+          const logoY = smoothedBox.yCenter - logoSize / 2;
+
+          canvasCtx.drawImage(logoImage, logoX, logoY, logoSize, logoSize);
+        }
+
+      } else {
+        smoothedBox = null;
+      }
+    }
+
+    faceDetection.onResults(onResults);
+
+    // --- 3. Webカメラを標準的な解像度で要求 ---
+    navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 }, // 1280x720 (HD) を要求
+        height: { ideal: 720 }
+      }
+    })
+    .then((stream) => {
+      videoElement.srcObject = stream;
+      videoElement.play();
+
+      videoElement.onloadeddata = () => {
+        // 実際のビデオ解像度を取得
+        videoWidth = videoElement.videoWidth;
+        videoHeight = videoElement.videoHeight;
+
+        // 取得できたらループ開始
+        if (videoWidth > 0 && videoHeight > 0) {
+          predictionLoop();
+        }
+      };
+    })
+    .catch((err) => {
+      console.error("Webカメラへのアクセスエラー: ", err);
+      alert("Webカメラにアクセスできませんでした。");
+    });
+
+    async function predictionLoop() {
+      // ビデオの準備ができていない、またはサイズが未確定なら待機
+      if (videoElement.readyState < 2 || videoWidth === 0) {
+        requestAnimationFrame(predictionLoop);
+        return;
+      }
+
+      await faceDetection.send({ image: videoElement });
+      requestAnimationFrame(predictionLoop);
+    }
+  </script>
+</body>
+</html>
