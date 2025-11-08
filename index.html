@@ -32,10 +32,27 @@
     const canvasCtx = canvasElement.getContext('2d');
 
     // --- 1. キャンバスの解像度をウィンドウサイズに設定 ---
-    const canvasWidth = window.innerWidth;
-    const canvasHeight = window.innerHeight;
-    canvasElement.width = canvasWidth;
-    canvasElement.height = canvasHeight;
+
+    // 【★ 変更】 const から let に変更 (後で変更できるように)
+    let canvasWidth = 0;
+    let canvasHeight = 0;
+
+    // 【★ 追加】 キャンバスのサイズを設定する関数
+    function setupCanvas() {
+      canvasWidth = window.innerWidth;
+      canvasHeight = window.innerHeight;
+      canvasElement.width = canvasWidth;
+      canvasElement.height = canvasHeight;
+      console.log(`Canvas resized to: ${canvasWidth}x${canvasHeight}`); // サイズ変更の確認用
+    }
+
+    // 【★ 追加】 最初に一度実行
+    setupCanvas();
+
+    // 【★ 追加】 ウィンドウサイズが変更されたら、setupCanvas関数を再度実行する
+    window.onresize = setupCanvas;
+
+    // --------------------------------------------------
 
     const logoImage = new Image();
     logoImage.src = 'logo.svg';
@@ -43,11 +60,9 @@
     logoImage.onerror = () => { console.error('Failed to load logo.svg.'); };
 
     // --- スムージング設定 ---
-    // smoothedBox はピクセル座標（canvas上の座標）を保持するように変更
     let smoothedBox = null;
     const smoothingFactor = 0.2;
 
-    // 線形補間（Lerp）関数: 動きを滑らかにするために使用
     function lerp(start, end, amount) {
       return (1 - amount) * start + amount * end;
     }
@@ -74,6 +89,8 @@
 
     function onResults(results) {
       // 映像の描画領域を計算（object-fit: contain のシミュレーション）
+      // ※ この計算は毎フレーム実行されるため、
+      //    window.onresizeで canvasWidth/Height が更新されれば自動で追従します。
       const canvasAspect = canvasWidth / canvasHeight;
       const videoAspect = videoWidth / videoHeight;
 
@@ -120,7 +137,7 @@
 
         // --- 4. 四角形の描画 (drawRectangleの代わり) ---
         canvasCtx.strokeStyle = 'white';
-        canvasCtx.lineWidth = 15;
+        canvasCtx.lineWidth = 8;
         canvasCtx.beginPath();
         canvasCtx.rect(
           smoothedBox.xCenter - smoothedBox.width / 2, // 左上x
@@ -133,7 +150,7 @@
 
         // --- 5. ロゴの描画 (ピクセル座標ベース) ---
         if (logoImage.complete && logoImage.naturalWidth > 0) {
-          const logoSize = smoothedBox.width * 3.2; // スムージング後のピクセル幅
+          const logoSize = smoothedBox.width * 3; // スムージング後のピクセル幅
           const logoX = smoothedBox.xCenter - logoSize / 2;
           const logoY = smoothedBox.yCenter - logoSize / 2;
 
